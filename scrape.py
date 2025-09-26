@@ -36,8 +36,8 @@ def download_yahoo_chart(symbol: str, start: datetime, end: datetime):
         raise Exception(f"Failed {symbol}: {resp.status_code}")
     return resp.json()
 
-def save_daily_and_monthly(data, kode, nama):
-    """Simpan data ke file per hari (JSON) + gabungan per bulan (CSV)"""
+def save_daily_json(data, kode, nama):
+    """Simpan data ke file per tanggal (JSON harian)"""
     result = data.get("chart", {}).get("result", [])
     if not result:
         raise Exception("No result in JSON")
@@ -47,21 +47,17 @@ def save_daily_and_monthly(data, kode, nama):
     quotes = res.get("indicators", {}).get("quote", [{}])[0]
 
     outdir_json = os.path.join(OUTPUT_DIR, kode, "json")
-    outdir_csv = os.path.join(OUTPUT_DIR, kode, "csv")
     os.makedirs(outdir_json, exist_ok=True)
-    os.makedirs(outdir_csv, exist_ok=True)
 
+    records = []
     saved = 0
     for i, ts in enumerate(timestamps):
         dt_obj = datetime.fromtimestamp(ts, tz=timezone.utc)
-        # skip weekend (safety)
-        if dt_obj.weekday() >= 5:
+        if dt_obj.weekday() >= 5:  # skip weekend
             continue
 
         date_str = dt_obj.strftime("%Y-%m-%d")
-        month_str = dt_obj.strftime("%Y-%m")  # contoh: 2025-09
         json_file = os.path.join(outdir_json, f"{date_str}.json")
-        csv_file = os.path.join(outdir_csv, f"{month_str}.csv")
 
         record = {
             "kode": kode,
@@ -78,20 +74,11 @@ def save_daily_and_monthly(data, kode, nama):
         if not os.path.exists(json_file):
             with open(json_file, "w", encoding="utf-8") as fjson:
                 json.dump(record, fjson, ensure_ascii=False, indent=2)
+            saved += 1
 
-        # Append ke CSV bulanan
-        write_header = not os.path.exists(csv_file)
-        with open(csv_file, "a", newline="", encoding="utf-8") as fcsv:
-            writer = csv.DictWriter(
-                fcsv,
-                fieldnames=["kode", "nama", "date", "open", "high", "low", "close", "volume"]
-            )
-            if write_header:
-                writer.writeheader()
-            writer.writerow(record)
+        records.append(record)
 
-        saved += 1
-    return saved
+    return records, saved
 
 def process_symbol(row, fetch_all: bool):
     kode = row["Kode"].strip()
@@ -108,32 +95,60 @@ def process_symbol(row, fetch_all: bool):
             start = end - timedelta(days=5)  # default hanya beberapa hari terakhir
 
         raw = download_yahoo_chart(symbol, start, end)
-        saved = save_daily_and_monthly(raw, kode, nama)
-        print(f"  -> {symbol} saved {saved} records")
+        records, saved = save_daily_json(raw, kode, nama)
+        print(f"  -> {symbol} saved {saved} new JSON files")
+        return kode, records
     except Exception as e:
         err_msg = f"Error {symbol}: {e}"
         print(f"  !! {err_msg}")
         with open(ERROR_LOG, "a", encoding="utf-8") as ferr:
             ferr.write(f"{datetime.now()} - {err_msg}\n")
+        return kode, []
 
-    time.sleep(0.5)
+def save_full_csv(all_data):
+    """Gabungkan semua JSON menjadi CSV per kode"""
+    for kode, records in all_data.items():
+        if not records:
+            continue
+        outdir_csv = os.path.join(OUTPUT_DIR, kode)
+        os.makedirs(outdir_csv, exist_ok=True)
+        csv_file = os.path.join(outdir_csv, f"{kode}.csv")
+
+        # Sort by date
+        records.sort(key=lambda x: x["date"])
+
+        with open(csv_file, "w", newline="", encoding="utf-8") as fcsv:
+            writer = csv.DictWriter(
+                fcsv,
+                fieldnames=["kode", "nama", "date", "open", "high", "low", "close", "volume"]
+            )
+            writer.writeheader()
+            writer.writerows(records)
+
+        print(f"CSV full saved: {csv_file} ({len(records)} rows)")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--all", action="store_true", help="Scrape full data from 2004 until now")
     args = parser.parse_args()
 
+    all_data = {}
+
     with open(CSV_FILE, newline="", encoding="utf-8") as f:
         reader = list(csv.DictReader(f))
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(process_symbol, row, args.all) for row in reader]
+        futures = {executor.submit(process_symbol, row, args.all): row["Kode"].strip() for row in reader}
         for future in as_completed(futures):
             try:
-                future.result()
+                kode, records = future.result()
+                all_data.setdefault(kode, []).extend(records)
             except Exception as e:
                 with open(ERROR_LOG, "a", encoding="utf-8") as ferr:
                     ferr.write(f"{datetime.now()} - Future error: {e}\n")
+
+    # Setelah semua selesai → buat CSV rekap
+    save_full_csv(all_data)
 
 if __name__ == "__main__":
     main()
