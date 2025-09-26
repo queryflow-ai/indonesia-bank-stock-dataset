@@ -1,0 +1,46 @@
+name: Update IDX Bank Data
+
+# Run at 20:00 WIB (Jakarta = UTC+7) -> 20:00 WIB == 13:00 UTC
+on:
+  schedule:
+    - cron: "0 13 * * *"   # every day at 13:00 UTC => 20:00 Asia/Jakarta
+  workflow_dispatch:        # bisa dijalankan manual
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run scraping script
+        run: python scrape.py
+
+      - name: Check if datasets changed
+        id: git-diff
+        run: |
+          git add datasets/ || true
+          if git diff --cached --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push changes
+        if: steps.git-diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update datasets on $(date +'%Y-%m-%d %H:%M:%S')"
+          git push
