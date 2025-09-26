@@ -3,8 +3,11 @@ name: Update IDX Bank Data
 # Run at 20:00 WIB (Jakarta = UTC+7) -> 20:00 WIB == 13:00 UTC
 on:
   schedule:
-    - cron: "0 13 * * *"   # every day at 13:00 UTC => 20:00 Asia/Jakarta
-  workflow_dispatch:        # bisa dijalankan manual
+    - cron: "0 13 * * *"   
+  workflow_dispatch:        
+
+permissions:
+  contents: write
 
 jobs:
   scrape:
@@ -13,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true 
 
       - name: Setup Python
         uses: actions/setup-python@v5
