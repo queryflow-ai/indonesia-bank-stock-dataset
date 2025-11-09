@@ -105,27 +105,6 @@ def process_symbol(row, fetch_all: bool):
             ferr.write(f"{datetime.now()} - {err_msg}\n")
         return kode, []
 
-def save_full_csv(all_data):
-    """Gabungkan semua JSON menjadi CSV per kode"""
-    for kode, records in all_data.items():
-        if not records:
-            continue
-        outdir_csv = os.path.join(OUTPUT_DIR, kode)
-        os.makedirs(outdir_csv, exist_ok=True)
-        csv_file = os.path.join(outdir_csv, f"{kode}.csv")
-
-        # Sort by date
-        records.sort(key=lambda x: x["date"])
-
-        with open(csv_file, "w", newline="", encoding="utf-8") as fcsv:
-            writer = csv.DictWriter(
-                fcsv,
-                fieldnames=["kode", "nama", "date", "open", "high", "low", "close", "volume"]
-            )
-            writer.writeheader()
-            writer.writerows(records)
-
-        print(f"CSV full saved: {csv_file} ({len(records)} rows)")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -146,9 +125,6 @@ def main():
             except Exception as e:
                 with open(ERROR_LOG, "a", encoding="utf-8") as ferr:
                     ferr.write(f"{datetime.now()} - Future error: {e}\n")
-
-    # Setelah semua selesai → buat CSV rekap
-    save_full_csv(all_data)
 
 if __name__ == "__main__":
     main()
